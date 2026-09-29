@@ -1,0 +1,15 @@
+# NOTE: .env is TRACKED on purpose, so a fresh clone on a live USB is ready
+# to run. Do not add it here. See the README.
+#
+# Use .env.local or an environment variable for a one-off override:
+#   CFG_HOSTNAME=laptop ./gir.sh setup
+.env.local
+
+# editor leftovers
+*.swp
+*.swo
+*~
+
+# stage3 tarballs, if anyone ever downloads one into the repo
+*.tar.xz
+*.tar.xz.asc
