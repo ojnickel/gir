@@ -1,0 +1,139 @@
+From 63561894f3f4ddb1bf658120d3fb0b90db4ce2b1 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 11 Oct 2026 15:20:27 +0000
+Subject: [PATCH] tui: remount existing install after live reboot; setup:
+ optional Samba
+
+---
+ .env         |  1 +
+ lib/setup.sh | 28 +++++++++++++++++++++++++++-
+ lib/tui.sh   | 21 ++++++++++++++++++++-
+ 3 files changed, 48 insertions(+), 2 deletions(-)
+
+diff --git a/.env b/.env
+index 6fd66bf..f15f45e 100644
+--- a/.env
++++ b/.env
+@@ -23,6 +23,7 @@ CFG_CONSKBD=de-latin1-nodeadkeys
+ CFG_SHELL=fish
+ CFG_DESKTOP=sway
+ CFG_PROFILE=plain
++CFG_SAMBA=yes
+ 
+ # ---------- Passwords ----------
+ # Deliberately EMPTY, because this file is in git. Left empty, setup.sh asks
+diff --git a/lib/setup.sh b/lib/setup.sh
+index c2d8d1c..6c08bde 100755
+--- a/lib/setup.sh
++++ b/lib/setup.sh
+@@ -54,7 +54,7 @@ if [ -z "${SETUP_ENV:-}" ]; then
+     unset _d
+ fi
+ CFG_VARS=(CFG_HOSTNAME CFG_USER CFG_TZONE CFG_LANG CFG_KBD CFG_CONSKBD
+-          CFG_SHELL CFG_DESKTOP CFG_PROFILE CFG_ROOT_PW CFG_USER_PW UNATTENDED)
++          CFG_SHELL CFG_DESKTOP CFG_PROFILE CFG_SAMBA CFG_ROOT_PW CFG_USER_PW UNATTENDED)
+ 
+ if [ -n "${SETUP_ENV:-}" ] && [ -f "$SETUP_ENV" ]; then
+     echo "Loading personal defaults from $SETUP_ENV"
+@@ -116,12 +116,14 @@ ask CFG_DESKTOP  "Desktop (sway, none)"           sway
+ # USE flags globally, so most binary packages stop matching and get compiled
+ # from source instead - hours rather than minutes. Sway does not need it.
+ ask CFG_PROFILE  "Profile: 'plain' (matches binhost, fast) or 'desktop'" plain
++ask CFG_SAMBA    "Samba (share home, mount NAS): yes or no" no
+ 
+ [[ "$CFG_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || { echo "Invalid user name."; exit 1; }
+ [ -e "/usr/share/zoneinfo/$CFG_TZONE" ] || { echo "Unknown time zone $CFG_TZONE."; exit 1; }
+ case "$CFG_PROFILE" in plain|desktop) ;; *) echo "Profile must be plain or desktop."; exit 1 ;; esac
+ case "$CFG_DESKTOP" in sway|none) ;;    *) echo "Desktop must be sway or none."; exit 1 ;; esac
+ case "$CFG_SHELL"   in bash|fish|zsh) ;; *) echo "Shell must be bash, fish or zsh."; exit 1 ;; esac
++case "$CFG_SAMBA"   in yes|no) ;;       *) echo "Samba must be yes or no."; exit 1 ;; esac
+ 
+ # ---------- Detect the init system of the extracted stage3 ----------
+ # tui.sh offers systemd stage3 variants, so nothing here may assume OpenRC.
+@@ -183,6 +185,7 @@ cat <<INFO
+   CPU:       $CPUS threads, $MEM_GB GB RAM -> MAKEOPTS -j$JOBS, binhost $LEVEL
+   GPU:       VIDEO_CARDS="$VIDEO"
+   Desktop:   $DESKTOP_DESC
++  Samba:     $CFG_SAMBA
+   Log:       $LOG
+ 
+ INFO
+@@ -399,6 +402,28 @@ s_boot() {
+     fi
+ }
+ 
++s_samba() {
++    if [ "$CFG_SAMBA" != yes ]; then echo "Samba 'no' - nothing to install"; return; fi
++    "${EMERGE[@]}" net-fs/samba net-fs/cifs-utils
++    mkdir -p /etc/samba
++    [ -f /etc/samba/smb.conf ] || cat > /etc/samba/smb.conf <<CONF
++[global]
++    workgroup = WORKGROUP
++    server role = standalone server
++    map to guest = never
++    passdb backend = tdbsam
++
++[homes]
++    browseable = no
++    read only = no
++    valid users = %S
++CONF
++    if [ "$INIT" = openrc ]; then rc-update add samba default
++    else SYSTEMD_IGNORE_CHROOT=1 systemctl enable smb.service; fi
++    echo "Samba password for $CFG_USER:"
++    until smbpasswd -a "$CFG_USER"; do echo "Try again."; done
++}
++
+ step 01-sync     s_sync
+ step 02-profile  s_profile
+ step 03-binhost  s_binhost
+@@ -410,6 +435,7 @@ step 08-system   s_system
+ step 09-desktop  s_desktop
+ step 10-user     s_user
+ step 11-boot     s_boot
++step 12-samba    s_samba
+ 
+ # ---------- Passwords (repeat until they work) ----------
+ # ---------- Passwords ----------
+diff --git a/lib/tui.sh b/lib/tui.sh
+index 09379ef..4cf2301 100755
+--- a/lib/tui.sh
++++ b/lib/tui.sh
+@@ -137,6 +137,23 @@ enter_chroot() {
+     fi
+ }
+ 
++pick_root() {
++    local -a items=(); local p fs size
++    while read -r p fs size; do
++        items+=("${p#/dev/}" "$fs  $size")
++    done < <(lsblk -lnpo NAME,FSTYPE,SIZE,TYPE | awk '$4 == "part" && $2 ~ /^(btrfs|ext4|xfs)$/ {print $1, $2, $3}')
++    [ ${#items[@]} -gt 0 ] || { msg "No btrfs/ext4/xfs partition found."; exit 1; }
++    menu "ROOT partition of the existing install:" "${items[@]}"
++}
++
++# Live system rebooted: mount the existing install again and chroot in
++remount() {
++    local part
++    part=$(pick_root) || exit 0
++    cls
++    MNT=$MNT bash "$DIR/../rescue.sh" "/dev/$part"
++}
++
+ # ---------- Modes ----------
+ 
+ full_install() {
+@@ -182,11 +199,13 @@ stage3_only() {
+ mode=$(menu "What do you want to do?" \
+     full   "Full install: partition, Btrfs, stage3, chroot" \
+     stage3 "Stage3 only (new root already mounted at $MNT)" \
+-    chroot "Chroot only (enter $MNT)") || exit 0
++    chroot "Chroot only (enter $MNT)" \
++    remount "Live USB rebooted: mount existing install + chroot") || exit 0
+ 
+ case "$mode" in
+     full)   full_install ;;
+     stage3) stage3_only ;;
+     chroot) enter_chroot ;;
++    remount) remount ;;
+ 
