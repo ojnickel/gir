@@ -1,0 +1,480 @@
+From a641519cdff39abc19ab1de6bc38e7226a9eb400 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 14 Oct 2026 15:20:35 +0000
+Subject: [PATCH 1/3] setup: optional Samba step; tui: remount after live
+ reboot; drop broken gg.patch
+
+---
+ .env         |   1 +
+ gg.patch     | 139 ---------------------------------------------------
+ lib/setup.sh |  28 ++++++++++-
+ lib/tui.sh   |  21 +++++++-
+ 4 files changed, 48 insertions(+), 141 deletions(-)
+ delete mode 100644 gg.patch
+
+diff --git a/.env b/.env
+index 6fd66bf..f15f45e 100644
+--- a/.env
++++ b/.env
+@@ -23,6 +23,7 @@ CFG_CONSKBD=de-latin1-nodeadkeys
+ CFG_SHELL=fish
+ CFG_DESKTOP=sway
+ CFG_PROFILE=plain
++CFG_SAMBA=yes
+ 
+ # ---------- Passwords ----------
+ # Deliberately EMPTY, because this file is in git. Left empty, setup.sh asks
+diff --git a/gg.patch b/gg.patch
+deleted file mode 100644
+index d713c6a..0000000
+--- a/gg.patch
++++ /dev/null
+@@ -1,139 +0,0 @@
+-From 63561894f3f4ddb1bf658120d3fb0b90db4ce2b1 Mon Sep 17 00:00:00 2001
+-From: Claude <noreply@anthropic.com>
+-Date: Sun, 11 Oct 2026 15:20:27 +0000
+-Subject: [PATCH] tui: remount existing install after live reboot; setup:
+- optional Samba
+-
+----
+- .env         |  1 +
+- lib/setup.sh | 28 +++++++++++++++++++++++++++-
+- lib/tui.sh   | 21 ++++++++++++++++++++-
+- 3 files changed, 48 insertions(+), 2 deletions(-)
+-
+-diff --git a/.env b/.env
+-index 6fd66bf..f15f45e 100644
+---- a/.env
+-+++ b/.env
+-@@ -23,6 +23,7 @@ CFG_CONSKBD=de-latin1-nodeadkeys
+- CFG_SHELL=fish
+- CFG_DESKTOP=sway
+- CFG_PROFILE=plain
+-+CFG_SAMBA=yes
+- 
+- # ---------- Passwords ----------
+- # Deliberately EMPTY, because this file is in git. Left empty, setup.sh asks
+-diff --git a/lib/setup.sh b/lib/setup.sh
+-index c2d8d1c..6c08bde 100755
+---- a/lib/setup.sh
+-+++ b/lib/setup.sh
+-@@ -54,7 +54,7 @@ if [ -z "${SETUP_ENV:-}" ]; then
+-     unset _d
+- fi
+- CFG_VARS=(CFG_HOSTNAME CFG_USER CFG_TZONE CFG_LANG CFG_KBD CFG_CONSKBD
+--          CFG_SHELL CFG_DESKTOP CFG_PROFILE CFG_ROOT_PW CFG_USER_PW UNATTENDED)
+-+          CFG_SHELL CFG_DESKTOP CFG_PROFILE CFG_SAMBA CFG_ROOT_PW CFG_USER_PW UNATTENDED)
+- 
+- if [ -n "${SETUP_ENV:-}" ] && [ -f "$SETUP_ENV" ]; then
+-     echo "Loading personal defaults from $SETUP_ENV"
+-@@ -116,12 +116,14 @@ ask CFG_DESKTOP  "Desktop (sway, none)"           sway
+- # USE flags globally, so most binary packages stop matching and get compiled
+- # from source instead - hours rather than minutes. Sway does not need it.
+- ask CFG_PROFILE  "Profile: 'plain' (matches binhost, fast) or 'desktop'" plain
+-+ask CFG_SAMBA    "Samba (share home, mount NAS): yes or no" no
+- 
+- [[ "$CFG_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || { echo "Invalid user name."; exit 1; }
+- [ -e "/usr/share/zoneinfo/$CFG_TZONE" ] || { echo "Unknown time zone $CFG_TZONE."; exit 1; }
+- case "$CFG_PROFILE" in plain|desktop) ;; *) echo "Profile must be plain or desktop."; exit 1 ;; esac
+- case "$CFG_DESKTOP" in sway|none) ;;    *) echo "Desktop must be sway or none."; exit 1 ;; esac
+- case "$CFG_SHELL"   in bash|fish|zsh) ;; *) echo "Shell must be bash, fish or zsh."; exit 1 ;; esac
+-+case "$CFG_SAMBA"   in yes|no) ;;       *) echo "Samba must be yes or no."; exit 1 ;; esac
+- 
+- # ---------- Detect the init system of the extracted stage3 ----------
+- # tui.sh offers systemd stage3 variants, so nothing here may assume OpenRC.
+-@@ -183,6 +185,7 @@ cat <<INFO
+-   CPU:       $CPUS threads, $MEM_GB GB RAM -> MAKEOPTS -j$JOBS, binhost $LEVEL
+-   GPU:       VIDEO_CARDS="$VIDEO"
+-   Desktop:   $DESKTOP_DESC
+-+  Samba:     $CFG_SAMBA
+-   Log:       $LOG
+- 
+- INFO
+-@@ -399,6 +402,28 @@ s_boot() {
+-     fi
+- }
+- 
+-+s_samba() {
+-+    if [ "$CFG_SAMBA" != yes ]; then echo "Samba 'no' - nothing to install"; return; fi
+-+    "${EMERGE[@]}" net-fs/samba net-fs/cifs-utils
+-+    mkdir -p /etc/samba
+-+    [ -f /etc/samba/smb.conf ] || cat > /etc/samba/smb.conf <<CONF
+-+[global]
+-+    workgroup = WORKGROUP
+-+    server role = standalone server
+-+    map to guest = never
+-+    passdb backend = tdbsam
+-+
+-+[homes]
+-+    browseable = no
+-+    read only = no
+-+    valid users = %S
+-+CONF
+-+    if [ "$INIT" = openrc ]; then rc-update add samba default
+-+    else SYSTEMD_IGNORE_CHROOT=1 systemctl enable smb.service; fi
+-+    echo "Samba password for $CFG_USER:"
+-+    until smbpasswd -a "$CFG_USER"; do echo "Try again."; done
+-+}
+-+
+- step 01-sync     s_sync
+- step 02-profile  s_profile
+- step 03-binhost  s_binhost
+-@@ -410,6 +435,7 @@ step 08-system   s_system
+- step 09-desktop  s_desktop
+- step 10-user     s_user
+- step 11-boot     s_boot
+-+step 12-samba    s_samba
+- 
+- # ---------- Passwords (repeat until they work) ----------
+- # ---------- Passwords ----------
+-diff --git a/lib/tui.sh b/lib/tui.sh
+-index 09379ef..4cf2301 100755
+---- a/lib/tui.sh
+-+++ b/lib/tui.sh
+-@@ -137,6 +137,23 @@ enter_chroot() {
+-     fi
+- }
+- 
+-+pick_root() {
+-+    local -a items=(); local p fs size
+-+    while read -r p fs size; do
+-+        items+=("${p#/dev/}" "$fs  $size")
+-+    done < <(lsblk -lnpo NAME,FSTYPE,SIZE,TYPE | awk '$4 == "part" && $2 ~ /^(btrfs|ext4|xfs)$/ {print $1, $2, $3}')
+-+    [ ${#items[@]} -gt 0 ] || { msg "No btrfs/ext4/xfs partition found."; exit 1; }
+-+    menu "ROOT partition of the existing install:" "${items[@]}"
+-+}
+-+
+-+# Live system rebooted: mount the existing install again and chroot in
+-+remount() {
+-+    local part
+-+    part=$(pick_root) || exit 0
+-+    cls
+-+    MNT=$MNT bash "$DIR/../rescue.sh" "/dev/$part"
+-+}
+-+
+- # ---------- Modes ----------
+- 
+- full_install() {
+-@@ -182,11 +199,13 @@ stage3_only() {
+- mode=$(menu "What do you want to do?" \
+-     full   "Full install: partition, Btrfs, stage3, chroot" \
+-     stage3 "Stage3 only (new root already mounted at $MNT)" \
+--    chroot "Chroot only (enter $MNT)") || exit 0
+-+    chroot "Chroot only (enter $MNT)" \
+-+    remount "Live USB rebooted: mount existing install + chroot") || exit 0
+- 
+- case "$mode" in
+-     full)   full_install ;;
+-     stage3) stage3_only ;;
+-     chroot) enter_chroot ;;
+-+    remount) remount ;;
+- 
+\ No newline at end of file
+diff --git a/lib/setup.sh b/lib/setup.sh
+index c2d8d1c..6c08bde 100755
+--- a/lib/setup.sh
++++ b/lib/setup.sh
+@@ -54,7 +54,7 @@ if [ -z "${SETUP_ENV:-}" ]; then
+     unset _d
+ fi
+ CFG_VARS=(CFG_HOSTNAME CFG_USER CFG_TZONE CFG_LANG CFG_KBD CFG_CONSKBD
+-          CFG_SHELL CFG_DESKTOP CFG_PROFILE CFG_ROOT_PW CFG_USER_PW UNATTENDED)
++          CFG_SHELL CFG_DESKTOP CFG_PROFILE CFG_SAMBA CFG_ROOT_PW CFG_USER_PW UNATTENDED)
+ 
+ if [ -n "${SETUP_ENV:-}" ] && [ -f "$SETUP_ENV" ]; then
+     echo "Loading personal defaults from $SETUP_ENV"
+@@ -116,12 +116,14 @@ ask CFG_DESKTOP  "Desktop (sway, none)"           sway
+ # USE flags globally, so most binary packages stop matching and get compiled
+ # from source instead - hours rather than minutes. Sway does not need it.
+ ask CFG_PROFILE  "Profile: 'plain' (matches binhost, fast) or 'desktop'" plain
++ask CFG_SAMBA    "Samba (share home, mount NAS): yes or no" no
+ 
+ [[ "$CFG_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || { echo "Invalid user name."; exit 1; }
+ [ -e "/usr/share/zoneinfo/$CFG_TZONE" ] || { echo "Unknown time zone $CFG_TZONE."; exit 1; }
+ case "$CFG_PROFILE" in plain|desktop) ;; *) echo "Profile must be plain or desktop."; exit 1 ;; esac
+ case "$CFG_DESKTOP" in sway|none) ;;    *) echo "Desktop must be sway or none."; exit 1 ;; esac
+ case "$CFG_SHELL"   in bash|fish|zsh) ;; *) echo "Shell must be bash, fish or zsh."; exit 1 ;; esac
++case "$CFG_SAMBA"   in yes|no) ;;       *) echo "Samba must be yes or no."; exit 1 ;; esac
+ 
+ # ---------- Detect the init system of the extracted stage3 ----------
+ # tui.sh offers systemd stage3 variants, so nothing here may assume OpenRC.
+@@ -183,6 +185,7 @@ cat <<INFO
+   CPU:       $CPUS threads, $MEM_GB GB RAM -> MAKEOPTS -j$JOBS, binhost $LEVEL
+   GPU:       VIDEO_CARDS="$VIDEO"
+   Desktop:   $DESKTOP_DESC
++  Samba:     $CFG_SAMBA
+   Log:       $LOG
+ 
+ INFO
+@@ -399,6 +402,28 @@ s_boot() {
+     fi
+ }
+ 
++s_samba() {
++    if [ "$CFG_SAMBA" != yes ]; then echo "Samba 'no' - nothing to install"; return; fi
++    "${EMERGE[@]}" net-fs/samba net-fs/cifs-utils
++    mkdir -p /etc/samba
++    [ -f /etc/samba/smb.conf ] || cat > /etc/samba/smb.conf <<CONF
++[global]
++    workgroup = WORKGROUP
++    server role = standalone server
++    map to guest = never
++    passdb backend = tdbsam
++
++[homes]
++    browseable = no
++    read only = no
++    valid users = %S
++CONF
++    if [ "$INIT" = openrc ]; then rc-update add samba default
++    else SYSTEMD_IGNORE_CHROOT=1 systemctl enable smb.service; fi
++    echo "Samba password for $CFG_USER:"
++    until smbpasswd -a "$CFG_USER"; do echo "Try again."; done
++}
++
+ step 01-sync     s_sync
+ step 02-profile  s_profile
+ step 03-binhost  s_binhost
+@@ -410,6 +435,7 @@ step 08-system   s_system
+ step 09-desktop  s_desktop
+ step 10-user     s_user
+ step 11-boot     s_boot
++step 12-samba    s_samba
+ 
+ # ---------- Passwords (repeat until they work) ----------
+ # ---------- Passwords ----------
+diff --git a/lib/tui.sh b/lib/tui.sh
+index 09379ef..4cf2301 100755
+--- a/lib/tui.sh
++++ b/lib/tui.sh
+@@ -137,6 +137,23 @@ enter_chroot() {
+     fi
+ }
+ 
++pick_root() {
++    local -a items=(); local p fs size
++    while read -r p fs size; do
++        items+=("${p#/dev/}" "$fs  $size")
++    done < <(lsblk -lnpo NAME,FSTYPE,SIZE,TYPE | awk '$4 == "part" && $2 ~ /^(btrfs|ext4|xfs)$/ {print $1, $2, $3}')
++    [ ${#items[@]} -gt 0 ] || { msg "No btrfs/ext4/xfs partition found."; exit 1; }
++    menu "ROOT partition of the existing install:" "${items[@]}"
++}
++
++# Live system rebooted: mount the existing install again and chroot in
++remount() {
++    local part
++    part=$(pick_root) || exit 0
++    cls
++    MNT=$MNT bash "$DIR/../rescue.sh" "/dev/$part"
++}
++
+ # ---------- Modes ----------
+ 
+ full_install() {
+@@ -182,11 +199,13 @@ stage3_only() {
+ mode=$(menu "What do you want to do?" \
+     full   "Full install: partition, Btrfs, stage3, chroot" \
+     stage3 "Stage3 only (new root already mounted at $MNT)" \
+-    chroot "Chroot only (enter $MNT)") || exit 0
++    chroot "Chroot only (enter $MNT)" \
++    remount "Live USB rebooted: mount existing install + chroot") || exit 0
+ 
+ case "$mode" in
+     full)   full_install ;;
+     stage3) stage3_only ;;
+     chroot) enter_chroot ;;
++    remount) remount ;;
+ esac
+ cls
+-- 
+2.43.0
+
+
+From 98d7a12885642cebb63fd287ed087d41885b6c13 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 14 Oct 2026 15:39:41 +0000
+Subject: [PATCH 2/3] setup: GRUB/console resolution 1920x1080, key repeat
+ (kbdrate + Sway)
+
+---
+ .env         |  3 +++
+ env.example  |  9 +++++++++
+ lib/setup.sh | 53 ++++++++++++++++++++++++++++++++++++++++++++++++++--
+ 3 files changed, 63 insertions(+), 2 deletions(-)
+
+diff --git a/.env b/.env
+index f15f45e..f79082b 100644
+--- a/.env
++++ b/.env
+@@ -24,6 +24,9 @@ CFG_SHELL=fish
+ CFG_DESKTOP=sway
+ CFG_PROFILE=plain
+ CFG_SAMBA=yes
++CFG_RES=1920x1080
++CFG_KEY_DELAY=250
++CFG_KEY_RATE=30
+ 
+ # ---------- Passwords ----------
+ # Deliberately EMPTY, because this file is in git. Left empty, setup.sh asks
+diff --git a/env.example b/env.example
+index 228e51b..2e043fc 100644
+--- a/env.example
++++ b/env.example
+@@ -40,6 +40,15 @@ CFG_SHELL=
+ CFG_DESKTOP=
+ CFG_PROFILE=
+ 
++# CFG_SAMBA      yes | no                   (default: no)
++# CFG_RES        GRUB + console resolution  (default: 1920x1080)
++# CFG_KEY_DELAY  key repeat delay in ms     (default: 250)
++# CFG_KEY_RATE   key repeats per second     (default: 30)
++CFG_SAMBA=
++CFG_RES=
++CFG_KEY_DELAY=
++CFG_KEY_RATE=
++
+ # ---------- Passwords ----------
+ # Leave BOTH empty to be prompted interactively at the end - that is the
+ # safest option and means no password is ever written to disk.
+diff --git a/lib/setup.sh b/lib/setup.sh
+index 6c08bde..abcf99b 100755
+--- a/lib/setup.sh
++++ b/lib/setup.sh
+@@ -54,7 +54,7 @@ if [ -z "${SETUP_ENV:-}" ]; then
+     unset _d
+ fi
+ CFG_VARS=(CFG_HOSTNAME CFG_USER CFG_TZONE CFG_LANG CFG_KBD CFG_CONSKBD
+-          CFG_SHELL CFG_DESKTOP CFG_PROFILE CFG_SAMBA CFG_ROOT_PW CFG_USER_PW UNATTENDED)
++          CFG_SHELL CFG_DESKTOP CFG_PROFILE CFG_SAMBA CFG_RES CFG_KEY_DELAY CFG_KEY_RATE CFG_ROOT_PW CFG_USER_PW UNATTENDED)
+ 
+ if [ -n "${SETUP_ENV:-}" ] && [ -f "$SETUP_ENV" ]; then
+     echo "Loading personal defaults from $SETUP_ENV"
+@@ -117,6 +117,9 @@ ask CFG_DESKTOP  "Desktop (sway, none)"           sway
+ # from source instead - hours rather than minutes. Sway does not need it.
+ ask CFG_PROFILE  "Profile: 'plain' (matches binhost, fast) or 'desktop'" plain
+ ask CFG_SAMBA    "Samba (share home, mount NAS): yes or no" no
++ask CFG_RES      "Screen resolution for GRUB + console" 1920x1080
++ask CFG_KEY_DELAY "Key repeat delay in ms" 250
++ask CFG_KEY_RATE "Key repeat rate per second" 30
+ 
+ [[ "$CFG_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || { echo "Invalid user name."; exit 1; }
+ [ -e "/usr/share/zoneinfo/$CFG_TZONE" ] || { echo "Unknown time zone $CFG_TZONE."; exit 1; }
+@@ -124,6 +127,9 @@ case "$CFG_PROFILE" in plain|desktop) ;; *) echo "Profile must be plain or deskt
+ case "$CFG_DESKTOP" in sway|none) ;;    *) echo "Desktop must be sway or none."; exit 1 ;; esac
+ case "$CFG_SHELL"   in bash|fish|zsh) ;; *) echo "Shell must be bash, fish or zsh."; exit 1 ;; esac
+ case "$CFG_SAMBA"   in yes|no) ;;       *) echo "Samba must be yes or no."; exit 1 ;; esac
++[[ "$CFG_RES" =~ ^[0-9]+x[0-9]+$ ]] || { echo "Resolution must look like 1920x1080."; exit 1; }
++[[ "$CFG_KEY_DELAY" =~ ^[0-9]+$ ]] || { echo "Key delay must be a number."; exit 1; }
++[[ "$CFG_KEY_RATE" =~ ^[0-9]+$ ]]  || { echo "Key rate must be a number."; exit 1; }
+ 
+ # ---------- Detect the init system of the extracted stage3 ----------
+ # tui.sh offers systemd stage3 variants, so nothing here may assume OpenRC.
+@@ -186,6 +192,7 @@ cat <<INFO
+   GPU:       VIDEO_CARDS="$VIDEO"
+   Desktop:   $DESKTOP_DESC
+   Samba:     $CFG_SAMBA
++  Screen:    $CFG_RES   Keys: ${CFG_KEY_DELAY} ms / ${CFG_KEY_RATE} per s
+   Log:       $LOG
+ 
+ INFO
+@@ -347,7 +354,11 @@ s_user() {
+             cat >> "$h/.config/sway/config" <<CONF
+ 
+ # --- setup.sh ---
+-input type:keyboard xkb_layout "$CFG_KBD"
++input type:keyboard {
++    xkb_layout "$CFG_KBD"
++    repeat_delay $CFG_KEY_DELAY
++    repeat_rate $CFG_KEY_RATE
++}
+ bar { swaybar_command waybar }
+ exec gentoo-pipewire-launcher restart
+ exec mako
+@@ -394,6 +405,7 @@ s_boot() {
+     fi
+     # Fallback path \EFI\BOOT\BOOTX64.EFI: boots even if the NVRAM entry gets lost
+     grub-install --target=x86_64-efi --efi-directory=/boot/efi --removable
++    grub_res
+     grub-mkconfig -o /boot/grub/grub.cfg
+     # Only a btrfs root lives in a subvolume, so only it needs rootflags
+     if [ "$ROOTFS" = btrfs ]; then
+@@ -402,6 +414,42 @@ s_boot() {
+     fi
+ }
+ 
++# GRUB menu and the console in $CFG_RES (set or replace, so re-runs are safe)
++grub_res() {
++    local f=/etc/default/grub kv
++    touch "$f"
++    for kv in "GRUB_GFXMODE=$CFG_RES,auto" "GRUB_GFXPAYLOAD_LINUX=keep"; do
++        if grep -q "^#\?${kv%%=*}=" "$f"; then
++            sed -i "s|^#\?${kv%%=*}=.*|${kv%%=*}=\"${kv#*=}\"|" "$f"
++        else
++            echo "${kv%%=*}=\"${kv#*=}\"" >> "$f"
++        fi
++    done
++}
++
++# Key repeat on the text console (Sway gets it in its own config)
++s_kbdrate() {
++    "${EMERGE[@]}" sys-apps/kbd
++    local cmd="kbdrate -s -d $CFG_KEY_DELAY -r $CFG_KEY_RATE"
++    if [ "$INIT" = openrc ]; then
++        mkdir -p /etc/local.d
++        printf '#!/bin/sh\n%s\n' "$cmd" > /etc/local.d/kbdrate.start
++        chmod +x /etc/local.d/kbdrate.start
++        rc-update add local default
++    else
++        cat > /etc/systemd/system/kbdrate.service <<UNIT
++[Unit]
++Description=Console key repeat rate
++[Service]
++Type=oneshot
++ExecStart=/usr/bin/$cmd
++[Install]
++WantedBy=multi-user.target
++UNIT
++        SYSTEMD_IGNORE_CHROOT=1 systemctl enable kbdrate.service
++    fi
++}
++
+ s_samba() {
+     if [ "$CFG_SAMBA" != yes ]; then echo "Samba 'no' - nothing to install"; return; fi
+     "${EMERGE[@]}" net-fs/samba net-fs/cifs-utils
+@@ -436,6 +484,7 @@ step 09-desktop  s_desktop
+ step 10-user     s_user
+ step 11-boot     s_boot
+ step 12-samba    s_samba
++step 13-kbdrate  s_kbdrate
+ 
+ # ---------- Passwords (repeat until they work) ----------
+ # ---------- Passwords ----------
+-- 
+2.43.0
+
+
+From ab6d8b9f2d08e1db3b7564b88000ea552ac22c86 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 14 Oct 2026 15:47:45 +0000
+Subject: [PATCH 3/3] env: key repeat delay 900 ms, rate 11
+
+---
+ .env | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/.env b/.env
+index f79082b..01535d1 100644
+--- a/.env
++++ b/.env
+@@ -25,8 +25,8 @@ CFG_DESKTOP=sway
+ CFG_PROFILE=plain
+ CFG_SAMBA=yes
+ CFG_RES=1920x1080
+-CFG_KEY_DELAY=250
+-CFG_KEY_RATE=30
++CFG_KEY_DELAY=900
++CFG_KEY_RATE=11
+ 
+ # ---------- Passwords ----------
+ # Deliberately EMPTY, because this file is in git. Left empty, setup.sh asks
+-- 
