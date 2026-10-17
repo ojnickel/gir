@@ -1,29 +1,210 @@
-From a641519cdff39abc19ab1de6bc38e7226a9eb400 Mon Sep 17 00:00:00 2001
-From: Claude <noreply@anthropic.com>
-Date: Wed, 14 Oct 2026 15:20:35 +0000
-Subject: [PATCH 1/7] setup: optional Samba step; tui: remount after live
- reboot; drop broken gg.patch
-
----
- .env         |   1 +
- gg.patch     | 139 ---------------------------------------------------
- lib/setup.sh |  28 ++++++++++-
- lib/tui.sh   |  21 +++++++-
- 4 files changed, 48 insertions(+), 141 deletions(-)
- delete mode 100644 gg.patch
-
 diff --git a/.env b/.env
-index 6fd66bf..f15f45e 100644
+deleted file mode 100644
+index 6fd66bf..0000000
 --- a/.env
-+++ b/.env
-@@ -23,6 +23,7 @@ CFG_CONSKBD=de-latin1-nodeadkeys
- CFG_SHELL=fish
- CFG_DESKTOP=sway
- CFG_PROFILE=plain
-+CFG_SAMBA=yes
++++ /dev/null
+@@ -1,41 +0,0 @@
+-# Personal defaults for setup.sh - TRACKED IN GIT ON PURPOSE.
+-#
+-# This file is committed so that a fresh clone on a live USB already has
+-# everything filled in. env.example documents every option.
+-#
+-# These are defaults, not decisions: setup.sh offers them in the prompts and
+-# you can type over any of them. A variable set in the environment wins for a
+-# single run, e.g.   CFG_HOSTNAME=laptop bash /root/setup.sh
+-#
+-# Sourced by bash, so put anything with a $ or a space in SINGLE quotes.
+-
+-# ---------- Identity ----------
+-CFG_HOSTNAME=gentoo
+-CFG_USER=ossi
+-
+-# ---------- Locale and keyboard ----------
+-CFG_TZONE=Europe/Berlin
+-CFG_LANG=de_DE.UTF-8
+-CFG_KBD=de
+-CFG_CONSKBD=de-latin1-nodeadkeys
+-
+-# ---------- Choices ----------
+-CFG_SHELL=fish
+-CFG_DESKTOP=sway
+-CFG_PROFILE=plain
+-
+-# ---------- Passwords ----------
+-# Deliberately EMPTY, because this file is in git. Left empty, setup.sh asks
+-# for both at the end of the run and nothing is ever written to disk.
+-#
+-# If you ever do want them stored, do NOT put a plaintext password here.
+-# Use a hash in single quotes, which setup.sh hands to "chpasswd -e":
+-#     openssl passwd -6
+-#     CFG_ROOT_PW='$6$salt$digest'
+-# Even a hash in a repo can be attacked offline, so prefer the prompt.
+-CFG_ROOT_PW=
+-CFG_USER_PW=
+-
+-# ---------- Unattended ----------
+-# 1 = accept everything above without asking. Leave empty to be prompted.
+-UNATTENDED=
+diff --git a/.gitignore b/.gitignore
+index 0e9ad7d..b4d0458 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,8 +1,5 @@
+-# NOTE: .env is TRACKED on purpose, so a fresh clone on a live USB is ready
+-# to run. Do not add it here. See the README.
+-#
+-# Use .env.local or an environment variable for a one-off override:
+-#   CFG_HOSTNAME=laptop ./gir.sh setup
++# Personal settings and passwords never go into git - use ~/.env
++.env
+ .env.local
  
+ # editor leftovers
+diff --git a/README.md b/README.md
+index ab452b8..22cc23f 100644
+--- a/README.md
++++ b/README.md
+@@ -75,7 +75,6 @@ bash /root/setup.sh
+ ```
+ gir.sh          single entry point — every command below
+ rescue.sh       mount a broken system and chroot in
+-.env            your defaults (tracked on purpose)
+ env.example     reference for every option
+ lib/
+   tui.sh        menu front end (dialog, whiptail, or plain text)
+@@ -157,68 +156,35 @@ service manager, keymap file and filesystem tools. Safe to re-run: finished
+ steps are marked in `/var/lib/setup.sh/` and skipped. Log in
+ `/var/log/setup.log`.
+ 
+-### Your defaults: .env
++### Your settings: ~/.env
+ 
+-Hostname, user, locale and keyboard live in `.env`, **not** in the scripts.
+-That file is tracked in git, so a fresh clone already has them — nothing to
+-carry to the live system separately.
+-
+-They are **defaults, not decisions**: every one is offered in a prompt and can
+-be typed over. An environment variable wins for a single run:
++Hostname, user, locale, keyboard and passwords live in `~/.env`, **not** in
++the repo. Start from the example:
+ 
+ ```sh
+-CFG_HOSTNAME=laptop ./gir.sh setup
+-UNATTENDED=1 ./gir.sh setup          # accept everything, ask nothing
++cp env.example ~/.env
++chmod 600 ~/.env
++nano ~/.env
+ ```
+ 
+-| Variable | In the tracked `.env` | Meaning |
+-|---|---|---|
+-| `CFG_HOSTNAME` | `gentoo` | Hostname |
+-| `CFG_USER` | `ossi` | Account to create (added to `wheel`) |
+-| `CFG_TZONE` | `Europe/Berlin` | Time zone |
+-| `CFG_LANG` | `de_DE.UTF-8` | System locale |
+-| `CFG_KBD` | `de` | X/Wayland keyboard layout |
+-| `CFG_CONSKBD` | `de-latin1-nodeadkeys` | Console keymap |
+-| `CFG_SHELL` | `fish` | Login shell: `bash`, `fish`, `zsh` |
+-| `CFG_DESKTOP` | `sway` | `sway` or `none` (console only) |
+-| `CFG_PROFILE` | `plain` | `plain` or `desktop` — see below |
+-| `CFG_ROOT_PW` | *(empty — prompted)* | root password |
+-| `CFG_USER_PW` | *(empty — prompted)* | user password |
+-| `UNATTENDED` | *(empty)* | `1` accepts everything without asking |
+-
+-Search order: `$SETUP_ENV`, `/root/.env`, `.env` beside the script, the repo
+-root, then `~/.env`. First hit wins. With no `.env` at all, every personal
+-field starts empty and is asked for; empty answers are refused.
+-
+-`env.example` documents all of it if you want to start clean.
+-
+-### Passwords
+-
+-Both are **empty** in the tracked `.env`, which is the right choice for a file
+-in version control: you get prompted at the end and nothing is written to
+-disk.
+-
+-If you do store one, never put plaintext in a tracked file. Use a hash — a
+-value starting with `$` is passed to `chpasswd -e`:
++Every value is a default you can type over. An environment variable wins for
++a single run:
+ 
+ ```sh
+-openssl passwd -6        # or: mkpasswd --method=yescrypt
++CFG_HOSTNAME=laptop ./gir.sh setup
++UNATTENDED=1 ./gir.sh setup          # accept everything, ask nothing
+ ```
+ 
+-**Single-quote it.** `.env` is sourced by bash, so an unquoted `$6$salt$digest`
+-expands to nothing:
++`env.example` lists every option. Search order: `$SETUP_ENV`, `/root/.env`,
++`~/.env`. With no file at all, every personal field is asked for.
+ 
+-```sh
+-CFG_ROOT_PW='$6$salt$digest'     # correct
+-CFG_ROOT_PW=$6$salt$digest       # WRONG — bash eats it
+-```
++### Passwords
+ 
+-A hash in a repo can still be attacked offline, so the prompt stays better.
+-`setup.sh` rejects a value that starts with `$` but is not a well-formed hash,
+-so a mangled one fails loudly instead of setting a password nobody knows.
+-Passwords are piped straight into `chpasswd` and never reach stdout, so they
+-stay out of the log. `/root/.env` — the throwaway copy inside the chroot — is
+-shredded after a successful run.
++Put `CFG_ROOT_PW` and `CFG_USER_PW` in `~/.env`, in single quotes, or leave
++them empty to be asked. A hash from `openssl passwd -6` works too (a value
++starting with `$` goes to `chpasswd -e`). Samba uses `CFG_USER_PW` as well.
++`gir.sh chroot` copies `~/.env` to `/root/.env` inside the new system, and
++that copy is shredded after a successful setup.
+ 
+ ### plain vs desktop profile
+ 
+diff --git a/env.example b/env.example
+index 228e51b..77cb65d 100644
+--- a/env.example
++++ b/env.example
+@@ -1,17 +1,18 @@
+-# Reference for every setup.sh option. The real file is .env next to this
+-# one, which IS tracked in git so that a fresh clone is ready to use.
++# Reference for every setup.sh option. Your real settings (and passwords)
++# go in ~/.env, which is NOT in git:
+ #
+-#   cp env.example .env       # only needed if .env is missing
+-#   $EDITOR .env
++#   cp env.example ~/.env
++#   chmod 600 ~/.env
++#   nano ~/.env
+ #
+ # Without any .env every personal field starts out empty and setup.sh asks
+ # for it. Values here are defaults you can type over; a variable set in the
+ # environment wins for a single run.
+ #
+-# setup.sh looks for it at $SETUP_ENV, then /root/.env, then .env next to
+-# the script, then ~/.env.
++# setup.sh looks for it at $SETUP_ENV, then /root/.env, then ~/.env.
+ #
+-# Keep passwords OUT of a tracked .env - see the Passwords section below.
++# Passwords: leave them empty here and put them in a copy at ~/.env
++# (cp .env ~/.env; chmod 600 ~/.env) - ~/.env is used first.
+ #
+ # Anything set here becomes the DEFAULT in the prompt - you can still type
+ # over it. Set UNATTENDED=1 to accept them all without being asked.
+@@ -40,6 +41,15 @@ CFG_SHELL=
+ CFG_DESKTOP=
+ CFG_PROFILE=
+ 
++# CFG_SAMBA      yes | no                   (default: no)
++# CFG_RES        GRUB + console resolution  (default: 1920x1080)
++# CFG_KEY_DELAY  key repeat delay in ms     (default: 250)
++# CFG_KEY_RATE   key repeats per second     (default: 30)
++CFG_SAMBA=
++CFG_RES=
++CFG_KEY_DELAY=
++CFG_KEY_RATE=
++
  # ---------- Passwords ----------
- # Deliberately EMPTY, because this file is in git. Left empty, setup.sh asks
+ # Leave BOTH empty to be prompted interactively at the end - that is the
+ # safest option and means no password is ever written to disk.
 diff --git a/gg.patch b/gg.patch
 deleted file mode 100644
 index d713c6a..0000000
@@ -170,24 +351,86 @@ index d713c6a..0000000
 -+    remount) remount ;;
 - 
 \ No newline at end of file
+diff --git a/lib/chroot.sh b/lib/chroot.sh
+index be1803d..bcd9196 100755
+--- a/lib/chroot.sh
++++ b/lib/chroot.sh
+@@ -10,7 +10,7 @@ usage() {
+ }
+ 
+ DIR=$(cd "$(dirname "$0")" && pwd)        # lib/, holds setup.sh
+-ROOT=$(cd "$DIR/.." && pwd)               # repo root, holds .env
++ROOT=$(cd "$DIR/.." && pwd)               # repo root
+ 
+ action="${1:-}"
+ case "$action" in
+@@ -92,7 +92,13 @@ mkroot() {
+     fi
+     # Personal defaults, which live outside the repo. May contain a password,
+     # so it goes in mode 600; setup.sh shreds this copy when it finishes.
+-    local env_src=${SETUP_ENV:-$ROOT/.env}
++    # Order: $SETUP_ENV, then ~/.env (your private copy with passwords),
++    # then a .env in the repo folder (ignored by git).
++    local env_src=${SETUP_ENV:-}
++    if [ -z "$env_src" ]; then
++        if [ -f "${HOME:-/root}/.env" ]; then env_src=${HOME:-/root}/.env
++        else env_src=$ROOT/.env; fi
++    fi
+     if [ -f "$env_src" ]; then
+         install -m 600 "$env_src" "$tdir/root/.env"
+         echo ".env copied to /root/.env (mode 600)"
 diff --git a/lib/setup.sh b/lib/setup.sh
-index c2d8d1c..6c08bde 100755
+index c2d8d1c..8b4ac19 100755
 --- a/lib/setup.sh
 +++ b/lib/setup.sh
-@@ -54,7 +54,7 @@ if [ -z "${SETUP_ENV:-}" ]; then
+@@ -6,7 +6,7 @@
+ #
+ # Usage (in the chroot):  bash /root/setup.sh
+ #
+-# Personal defaults come from the repo's .env, which is tracked (see env.example).
++# Personal defaults come from ~/.env, which is not in git (see env.example).
+ # Every answer can also be preset in the environment, which wins over the file:
+ #   CFG_HOSTNAME  CFG_USER  CFG_TZONE  CFG_LANG  CFG_KBD  CFG_CONSKBD
+ #   CFG_SHELL (bash|fish|zsh)  CFG_DESKTOP (sway|none)  CFG_PROFILE (plain|desktop)
+@@ -38,23 +38,22 @@ mountpoint -q /boot/efi || { echo "/boot/efi is not mounted. From the live syste
+     echo "  mount /dev/<disk>1 /mnt/gentoo/boot/efi   (NVMe: /dev/nvme0n1p1)"; exit 1; }
+ 
+ # ---------- Personal defaults live in .env, not in this script ----------
+-# The repo's .env is tracked in git, so a fresh clone already has hostname,
+-# user, locale and keyboard filled in (see env.example for every option).
+-# Its values are offered as prompt defaults and can be typed over; a
++# ~/.env (a copy of env.example) holds hostname, user, locale, keyboard and
++# optionally the passwords. It is not in git. Its values are offered as prompt defaults and can be typed over; a
+ # variable set in the environment wins for a single run. Passwords are
+-# deliberately empty there, so they get asked for instead.
++# asked for if empty.
+ # With no .env at all, every personal field starts empty and is asked for.
+-# Search order: $SETUP_ENV, /root/.env (the copy chroot.sh makes), .env
+-# beside this script, the repo root one level up, then ~/.env.
++# Search order: $SETUP_ENV, /root/.env (= ~/.env of root, your private copy),
++# ~/.env, then the repo .env beside this script or one level up.
+ if [ -z "${SETUP_ENV:-}" ]; then
+     _d=$(cd "$(dirname "$0")" && pwd)
+-    for c in /root/.env "$_d/.env" "$_d/../.env" "${HOME:-/root}/.env"; do
++    for c in /root/.env "${HOME:-/root}/.env" "$_d/.env" "$_d/../.env"; do
+         if [ -f "$c" ]; then SETUP_ENV=$c; break; fi
+     done
      unset _d
  fi
  CFG_VARS=(CFG_HOSTNAME CFG_USER CFG_TZONE CFG_LANG CFG_KBD CFG_CONSKBD
 -          CFG_SHELL CFG_DESKTOP CFG_PROFILE CFG_ROOT_PW CFG_USER_PW UNATTENDED)
-+          CFG_SHELL CFG_DESKTOP CFG_PROFILE CFG_SAMBA CFG_ROOT_PW CFG_USER_PW UNATTENDED)
++          CFG_SHELL CFG_DESKTOP CFG_PROFILE CFG_SAMBA CFG_RES CFG_KEY_DELAY CFG_KEY_RATE CFG_ROOT_PW CFG_USER_PW UNATTENDED)
  
  if [ -n "${SETUP_ENV:-}" ] && [ -f "$SETUP_ENV" ]; then
      echo "Loading personal defaults from $SETUP_ENV"
-@@ -116,12 +116,14 @@ ask CFG_DESKTOP  "Desktop (sway, none)"           sway
+@@ -116,12 +115,20 @@ ask CFG_DESKTOP  "Desktop (sway, none)"           sway
  # USE flags globally, so most binary packages stop matching and get compiled
  # from source instead - hours rather than minutes. Sway does not need it.
  ask CFG_PROFILE  "Profile: 'plain' (matches binhost, fast) or 'desktop'" plain
 +ask CFG_SAMBA    "Samba (share home, mount NAS): yes or no" no
++ask CFG_RES      "Screen resolution for GRUB + console" 1920x1080
++ask CFG_KEY_DELAY "Key repeat delay in ms" 250
++ask CFG_KEY_RATE "Key repeat rate per second" 30
  
  [[ "$CFG_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || { echo "Invalid user name."; exit 1; }
  [ -e "/usr/share/zoneinfo/$CFG_TZONE" ] || { echo "Unknown time zone $CFG_TZONE."; exit 1; }
@@ -195,189 +438,58 @@ index c2d8d1c..6c08bde 100755
  case "$CFG_DESKTOP" in sway|none) ;;    *) echo "Desktop must be sway or none."; exit 1 ;; esac
  case "$CFG_SHELL"   in bash|fish|zsh) ;; *) echo "Shell must be bash, fish or zsh."; exit 1 ;; esac
 +case "$CFG_SAMBA"   in yes|no) ;;       *) echo "Samba must be yes or no."; exit 1 ;; esac
- 
- # ---------- Detect the init system of the extracted stage3 ----------
- # tui.sh offers systemd stage3 variants, so nothing here may assume OpenRC.
-@@ -183,6 +185,7 @@ cat <<INFO
-   CPU:       $CPUS threads, $MEM_GB GB RAM -> MAKEOPTS -j$JOBS, binhost $LEVEL
-   GPU:       VIDEO_CARDS="$VIDEO"
-   Desktop:   $DESKTOP_DESC
-+  Samba:     $CFG_SAMBA
-   Log:       $LOG
- 
- INFO
-@@ -399,6 +402,28 @@ s_boot() {
-     fi
- }
- 
-+s_samba() {
-+    if [ "$CFG_SAMBA" != yes ]; then echo "Samba 'no' - nothing to install"; return; fi
-+    "${EMERGE[@]}" net-fs/samba net-fs/cifs-utils
-+    mkdir -p /etc/samba
-+    [ -f /etc/samba/smb.conf ] || cat > /etc/samba/smb.conf <<CONF
-+[global]
-+    workgroup = WORKGROUP
-+    server role = standalone server
-+    map to guest = never
-+    passdb backend = tdbsam
-+
-+[homes]
-+    browseable = no
-+    read only = no
-+    valid users = %S
-+CONF
-+    if [ "$INIT" = openrc ]; then rc-update add samba default
-+    else SYSTEMD_IGNORE_CHROOT=1 systemctl enable smb.service; fi
-+    echo "Samba password for $CFG_USER:"
-+    until smbpasswd -a "$CFG_USER"; do echo "Try again."; done
-+}
-+
- step 01-sync     s_sync
- step 02-profile  s_profile
- step 03-binhost  s_binhost
-@@ -410,6 +435,7 @@ step 08-system   s_system
- step 09-desktop  s_desktop
- step 10-user     s_user
- step 11-boot     s_boot
-+step 12-samba    s_samba
- 
- # ---------- Passwords (repeat until they work) ----------
- # ---------- Passwords ----------
-diff --git a/lib/tui.sh b/lib/tui.sh
-index 09379ef..4cf2301 100755
---- a/lib/tui.sh
-+++ b/lib/tui.sh
-@@ -137,6 +137,23 @@ enter_chroot() {
-     fi
- }
- 
-+pick_root() {
-+    local -a items=(); local p fs size
-+    while read -r p fs size; do
-+        items+=("${p#/dev/}" "$fs  $size")
-+    done < <(lsblk -lnpo NAME,FSTYPE,SIZE,TYPE | awk '$4 == "part" && $2 ~ /^(btrfs|ext4|xfs)$/ {print $1, $2, $3}')
-+    [ ${#items[@]} -gt 0 ] || { msg "No btrfs/ext4/xfs partition found."; exit 1; }
-+    menu "ROOT partition of the existing install:" "${items[@]}"
-+}
-+
-+# Live system rebooted: mount the existing install again and chroot in
-+remount() {
-+    local part
-+    part=$(pick_root) || exit 0
-+    cls
-+    MNT=$MNT bash "$DIR/../rescue.sh" "/dev/$part"
-+}
-+
- # ---------- Modes ----------
- 
- full_install() {
-@@ -182,11 +199,13 @@ stage3_only() {
- mode=$(menu "What do you want to do?" \
-     full   "Full install: partition, Btrfs, stage3, chroot" \
-     stage3 "Stage3 only (new root already mounted at $MNT)" \
--    chroot "Chroot only (enter $MNT)") || exit 0
-+    chroot "Chroot only (enter $MNT)" \
-+    remount "Live USB rebooted: mount existing install + chroot") || exit 0
- 
- case "$mode" in
-     full)   full_install ;;
-     stage3) stage3_only ;;
-     chroot) enter_chroot ;;
-+    remount) remount ;;
- esac
- cls
--- 
-2.43.0
-
-
-From 98d7a12885642cebb63fd287ed087d41885b6c13 Mon Sep 17 00:00:00 2001
-From: Claude <noreply@anthropic.com>
-Date: Wed, 14 Oct 2026 15:39:41 +0000
-Subject: [PATCH 2/7] setup: GRUB/console resolution 1920x1080, key repeat
- (kbdrate + Sway)
-
----
- .env         |  3 +++
- env.example  |  9 +++++++++
- lib/setup.sh | 53 ++++++++++++++++++++++++++++++++++++++++++++++++++--
- 3 files changed, 63 insertions(+), 2 deletions(-)
-
-diff --git a/.env b/.env
-index f15f45e..f79082b 100644
---- a/.env
-+++ b/.env
-@@ -24,6 +24,9 @@ CFG_SHELL=fish
- CFG_DESKTOP=sway
- CFG_PROFILE=plain
- CFG_SAMBA=yes
-+CFG_RES=1920x1080
-+CFG_KEY_DELAY=250
-+CFG_KEY_RATE=30
- 
- # ---------- Passwords ----------
- # Deliberately EMPTY, because this file is in git. Left empty, setup.sh asks
-diff --git a/env.example b/env.example
-index 228e51b..2e043fc 100644
---- a/env.example
-+++ b/env.example
-@@ -40,6 +40,15 @@ CFG_SHELL=
- CFG_DESKTOP=
- CFG_PROFILE=
- 
-+# CFG_SAMBA      yes | no                   (default: no)
-+# CFG_RES        GRUB + console resolution  (default: 1920x1080)
-+# CFG_KEY_DELAY  key repeat delay in ms     (default: 250)
-+# CFG_KEY_RATE   key repeats per second     (default: 30)
-+CFG_SAMBA=
-+CFG_RES=
-+CFG_KEY_DELAY=
-+CFG_KEY_RATE=
-+
- # ---------- Passwords ----------
- # Leave BOTH empty to be prompted interactively at the end - that is the
- # safest option and means no password is ever written to disk.
-diff --git a/lib/setup.sh b/lib/setup.sh
-index 6c08bde..abcf99b 100755
---- a/lib/setup.sh
-+++ b/lib/setup.sh
-@@ -54,7 +54,7 @@ if [ -z "${SETUP_ENV:-}" ]; then
-     unset _d
- fi
- CFG_VARS=(CFG_HOSTNAME CFG_USER CFG_TZONE CFG_LANG CFG_KBD CFG_CONSKBD
--          CFG_SHELL CFG_DESKTOP CFG_PROFILE CFG_SAMBA CFG_ROOT_PW CFG_USER_PW UNATTENDED)
-+          CFG_SHELL CFG_DESKTOP CFG_PROFILE CFG_SAMBA CFG_RES CFG_KEY_DELAY CFG_KEY_RATE CFG_ROOT_PW CFG_USER_PW UNATTENDED)
- 
- if [ -n "${SETUP_ENV:-}" ] && [ -f "$SETUP_ENV" ]; then
-     echo "Loading personal defaults from $SETUP_ENV"
-@@ -117,6 +117,9 @@ ask CFG_DESKTOP  "Desktop (sway, none)"           sway
- # from source instead - hours rather than minutes. Sway does not need it.
- ask CFG_PROFILE  "Profile: 'plain' (matches binhost, fast) or 'desktop'" plain
- ask CFG_SAMBA    "Samba (share home, mount NAS): yes or no" no
-+ask CFG_RES      "Screen resolution for GRUB + console" 1920x1080
-+ask CFG_KEY_DELAY "Key repeat delay in ms" 250
-+ask CFG_KEY_RATE "Key repeat rate per second" 30
- 
- [[ "$CFG_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || { echo "Invalid user name."; exit 1; }
- [ -e "/usr/share/zoneinfo/$CFG_TZONE" ] || { echo "Unknown time zone $CFG_TZONE."; exit 1; }
-@@ -124,6 +127,9 @@ case "$CFG_PROFILE" in plain|desktop) ;; *) echo "Profile must be plain or deskt
- case "$CFG_DESKTOP" in sway|none) ;;    *) echo "Desktop must be sway or none."; exit 1 ;; esac
- case "$CFG_SHELL"   in bash|fish|zsh) ;; *) echo "Shell must be bash, fish or zsh."; exit 1 ;; esac
- case "$CFG_SAMBA"   in yes|no) ;;       *) echo "Samba must be yes or no."; exit 1 ;; esac
 +[[ "$CFG_RES" =~ ^[0-9]+x[0-9]+$ ]] || { echo "Resolution must look like 1920x1080."; exit 1; }
 +[[ "$CFG_KEY_DELAY" =~ ^[0-9]+$ ]] || { echo "Key delay must be a number."; exit 1; }
 +[[ "$CFG_KEY_RATE" =~ ^[0-9]+$ ]]  || { echo "Key rate must be a number."; exit 1; }
  
  # ---------- Detect the init system of the extracted stage3 ----------
  # tui.sh offers systemd stage3 variants, so nothing here may assume OpenRC.
-@@ -186,6 +192,7 @@ cat <<INFO
+@@ -183,6 +190,8 @@ cat <<INFO
+   CPU:       $CPUS threads, $MEM_GB GB RAM -> MAKEOPTS -j$JOBS, binhost $LEVEL
    GPU:       VIDEO_CARDS="$VIDEO"
    Desktop:   $DESKTOP_DESC
-   Samba:     $CFG_SAMBA
++  Samba:     $CFG_SAMBA
 +  Screen:    $CFG_RES   Keys: ${CFG_KEY_DELAY} ms / ${CFG_KEY_RATE} per s
    Log:       $LOG
  
  INFO
-@@ -347,7 +354,11 @@ s_user() {
+@@ -311,9 +320,22 @@ s_system() {
+     chmod 440 /etc/sudoers.d/wheel
+ }
+ 
++# GURU overlay (community packages, e.g. fuzzel). Safe to run again.
++enable_guru() {
++    "${EMERGE[@]}" app-eselect/eselect-repository dev-vcs/git
++    if ! eselect repository list -i | grep -qw guru; then
++        eselect repository enable guru
++    fi
++    emaint sync -r guru
++}
++
+ s_desktop() {
+     if [ "$CFG_DESKTOP" != sway ]; then echo "Desktop 'none' - nothing to install"; return; fi
+     echo "media-video/pipewire sound-server" > /etc/portage/package.use/pipewire
++    enable_guru
++    # fuzzel is only in GURU, and GURU has only testing (~amd64) versions
++    mkdir -p /etc/portage/package.accept_keywords
++    echo "gui-apps/fuzzel ~amd64" > /etc/portage/package.accept_keywords/fuzzel
+     "${EMERGE[@]}" gui-wm/sway gui-apps/swaybg gui-apps/swaylock gui-apps/swayidle \
+         gui-apps/waybar gui-apps/foot gui-apps/fuzzel gui-apps/mako \
+         gui-apps/grim gui-apps/slurp gui-apps/wl-clipboard \
+@@ -329,7 +351,11 @@ s_user() {
+     local sh
+     sh=$(command -v "$CFG_SHELL" || echo /bin/bash)    # real path, not a guessed one
+     grep -qx "$sh" /etc/shells 2>/dev/null || echo "$sh" >> /etc/shells
+-    id "$CFG_USER" >/dev/null 2>&1 || useradd -m -G "${groups#,}" -s "$sh" "$CFG_USER"
++    if id "$CFG_USER" >/dev/null 2>&1; then
++        usermod -aG "${groups#,}" "$CFG_USER"           # existing user: just add the groups
++    else
++        useradd -m -G "${groups#,}" -s "$sh" "$CFG_USER"
++    fi
+     local h
+     h=$(getent passwd "$CFG_USER" | cut -d: -f6)
+ 
+@@ -344,7 +370,11 @@ s_user() {
              cat >> "$h/.config/sway/config" <<CONF
  
  # --- setup.sh ---
@@ -390,7 +502,7 @@ index 6c08bde..abcf99b 100755
  bar { swaybar_command waybar }
  exec gentoo-pipewire-launcher restart
  exec mako
-@@ -394,6 +405,7 @@ s_boot() {
+@@ -391,6 +421,7 @@ s_boot() {
      fi
      # Fallback path \EFI\BOOT\BOOTX64.EFI: boots even if the NVRAM entry gets lost
      grub-install --target=x86_64-efi --efi-directory=/boot/efi --removable
@@ -398,10 +510,21 @@ index 6c08bde..abcf99b 100755
      grub-mkconfig -o /boot/grub/grub.cfg
      # Only a btrfs root lives in a subvolume, so only it needs rootflags
      if [ "$ROOTFS" = btrfs ]; then
-@@ -402,6 +414,42 @@ s_boot() {
+@@ -399,17 +430,129 @@ s_boot() {
      fi
  }
  
+-step 01-sync     s_sync
+-step 02-profile  s_profile
+-step 03-binhost  s_binhost
+-step 04-makeconf s_makeconf
+-step 05-locale   s_locale
+-step 06-world    s_world
+-step 07-kernel   s_kernel
+-step 08-system   s_system
+-step 09-desktop  s_desktop
+-step 10-user     s_user
+-step 11-boot     s_boot
 +# GRUB menu and the console in $CFG_RES (set or replace, so re-runs are safe)
 +grub_res() {
 +    local f=/etc/default/grub kv
@@ -438,134 +561,33 @@ index 6c08bde..abcf99b 100755
 +    fi
 +}
 +
- s_samba() {
-     if [ "$CFG_SAMBA" != yes ]; then echo "Samba 'no' - nothing to install"; return; fi
-     "${EMERGE[@]}" net-fs/samba net-fs/cifs-utils
-@@ -436,6 +484,7 @@ step 09-desktop  s_desktop
- step 10-user     s_user
- step 11-boot     s_boot
- step 12-samba    s_samba
-+step 13-kbdrate  s_kbdrate
- 
- # ---------- Passwords (repeat until they work) ----------
- # ---------- Passwords ----------
--- 
-2.43.0
-
-
-From ab6d8b9f2d08e1db3b7564b88000ea552ac22c86 Mon Sep 17 00:00:00 2001
-From: Claude <noreply@anthropic.com>
-Date: Wed, 14 Oct 2026 15:47:45 +0000
-Subject: [PATCH 3/7] env: key repeat delay 900 ms, rate 11
-
----
- .env | 4 ++--
- 1 file changed, 2 insertions(+), 2 deletions(-)
-
-diff --git a/.env b/.env
-index f79082b..01535d1 100644
---- a/.env
-+++ b/.env
-@@ -25,8 +25,8 @@ CFG_DESKTOP=sway
- CFG_PROFILE=plain
- CFG_SAMBA=yes
- CFG_RES=1920x1080
--CFG_KEY_DELAY=250
--CFG_KEY_RATE=30
-+CFG_KEY_DELAY=900
-+CFG_KEY_RATE=11
- 
- # ---------- Passwords ----------
- # Deliberately EMPTY, because this file is in git. Left empty, setup.sh asks
--- 
-2.43.0
-
-
-From fc3353058be6d45c4ee4e2d31c28af3e14c2e36b Mon Sep 17 00:00:00 2001
-From: Claude <noreply@anthropic.com>
-Date: Fri, 16 Oct 2026 15:00:14 +0000
-Subject: [PATCH 4/7] setup: enable GURU for fuzzel (~amd64)
-
----
- lib/setup.sh | 13 +++++++++++++
- 1 file changed, 13 insertions(+)
-
-diff --git a/lib/setup.sh b/lib/setup.sh
-index abcf99b..38b63eb 100755
---- a/lib/setup.sh
-+++ b/lib/setup.sh
-@@ -321,9 +321,22 @@ s_system() {
-     chmod 440 /etc/sudoers.d/wheel
- }
- 
-+# GURU overlay (community packages, e.g. fuzzel). Safe to run again.
-+enable_guru() {
-+    "${EMERGE[@]}" app-eselect/eselect-repository dev-vcs/git
-+    if ! eselect repository list -i | grep -qw guru; then
-+        eselect repository enable guru
++s_samba() {
++    if [ "$CFG_SAMBA" != yes ]; then echo "Samba 'no' - nothing to install"; return; fi
++    "${EMERGE[@]}" net-fs/samba net-fs/cifs-utils
++    mkdir -p /etc/samba
++    [ -f /etc/samba/smb.conf ] || cat > /etc/samba/smb.conf <<CONF
++[global]
++    workgroup = WORKGROUP
++    server role = standalone server
++    map to guest = never
++    passdb backend = tdbsam
++
++[homes]
++    browseable = no
++    read only = no
++    valid users = %S
++CONF
++    if [ "$INIT" = openrc ]; then rc-update add samba default
++    else SYSTEMD_IGNORE_CHROOT=1 systemctl enable smb.service; fi
++    if [ -n "${CFG_USER_PW:-}" ] && [[ "$CFG_USER_PW" != \$*\$*\$* ]]; then
++        printf '%s\n%s\n' "$CFG_USER_PW" "$CFG_USER_PW" | smbpasswd -a -s "$CFG_USER"
++        echo "Samba password for $CFG_USER = CFG_USER_PW"
++    else
++        echo "Samba password for $CFG_USER:"
++        until smbpasswd -a "$CFG_USER"; do echo "Try again."; done
 +    fi
-+    emaint sync -r guru
 +}
 +
- s_desktop() {
-     if [ "$CFG_DESKTOP" != sway ]; then echo "Desktop 'none' - nothing to install"; return; fi
-     echo "media-video/pipewire sound-server" > /etc/portage/package.use/pipewire
-+    enable_guru
-+    # fuzzel is only in GURU, and GURU has only testing (~amd64) versions
-+    mkdir -p /etc/portage/package.accept_keywords
-+    echo "gui-apps/fuzzel ~amd64" > /etc/portage/package.accept_keywords/fuzzel
-     "${EMERGE[@]}" gui-wm/sway gui-apps/swaybg gui-apps/swaylock gui-apps/swayidle \
-         gui-apps/waybar gui-apps/foot gui-apps/fuzzel gui-apps/mako \
-         gui-apps/grim gui-apps/slurp gui-apps/wl-clipboard \
--- 
-2.43.0
-
-
-From 3c881f8d0301b326088adbb8de5cec21479b11c9 Mon Sep 17 00:00:00 2001
-From: Claude <noreply@anthropic.com>
-Date: Fri, 16 Oct 2026 15:26:31 +0000
-Subject: [PATCH 5/7] setup: pick which steps to run; TUI entry 'setup';
- existing user gets groups
-
----
- lib/setup.sh | 103 ++++++++++++++++++++++++++++++++++++++-------------
- lib/tui.sh   |   4 +-
- 2 files changed, 81 insertions(+), 26 deletions(-)
-
-diff --git a/lib/setup.sh b/lib/setup.sh
-index 38b63eb..12ecbe9 100755
---- a/lib/setup.sh
-+++ b/lib/setup.sh
-@@ -352,7 +352,11 @@ s_user() {
-     local sh
-     sh=$(command -v "$CFG_SHELL" || echo /bin/bash)    # real path, not a guessed one
-     grep -qx "$sh" /etc/shells 2>/dev/null || echo "$sh" >> /etc/shells
--    id "$CFG_USER" >/dev/null 2>&1 || useradd -m -G "${groups#,}" -s "$sh" "$CFG_USER"
-+    if id "$CFG_USER" >/dev/null 2>&1; then
-+        usermod -aG "${groups#,}" "$CFG_USER"           # existing user: just add the groups
-+    else
-+        useradd -m -G "${groups#,}" -s "$sh" "$CFG_USER"
-+    fi
-     local h
-     h=$(getent passwd "$CFG_USER" | cut -d: -f6)
- 
-@@ -485,19 +489,66 @@ CONF
-     until smbpasswd -a "$CFG_USER"; do echo "Try again."; done
- }
- 
--step 01-sync     s_sync
--step 02-profile  s_profile
--step 03-binhost  s_binhost
--step 04-makeconf s_makeconf
--step 05-locale   s_locale
--step 06-world    s_world
--step 07-kernel   s_kernel
--step 08-system   s_system
--step 09-desktop  s_desktop
--step 10-user     s_user
--step 11-boot     s_boot
--step 12-samba    s_samba
--step 13-kbdrate  s_kbdrate
 +# ---------- Choose steps ----------
 +# name | function | what it does
 +STEPS=(
@@ -629,7 +651,7 @@ index 38b63eb..12ecbe9 100755
  
  # ---------- Passwords (repeat until they work) ----------
  # ---------- Passwords ----------
-@@ -520,17 +571,19 @@ set_pw() {   # set_pw ACCOUNT VALUE
+@@ -432,17 +575,19 @@ set_pw() {   # set_pw ACCOUNT VALUE
      esac
  }
  
@@ -661,14 +683,39 @@ index 38b63eb..12ecbe9 100755
  
  # The config may hold a password, so the COPY inside the chroot must not stay
 diff --git a/lib/tui.sh b/lib/tui.sh
-index 4cf2301..e6e5a3d 100755
+index 09379ef..e6e5a3d 100755
 --- a/lib/tui.sh
 +++ b/lib/tui.sh
-@@ -200,12 +200,14 @@ mode=$(menu "What do you want to do?" \
+@@ -137,6 +137,23 @@ enter_chroot() {
+     fi
+ }
+ 
++pick_root() {
++    local -a items=(); local p fs size
++    while read -r p fs size; do
++        items+=("${p#/dev/}" "$fs  $size")
++    done < <(lsblk -lnpo NAME,FSTYPE,SIZE,TYPE | awk '$4 == "part" && $2 ~ /^(btrfs|ext4|xfs)$/ {print $1, $2, $3}')
++    [ ${#items[@]} -gt 0 ] || { msg "No btrfs/ext4/xfs partition found."; exit 1; }
++    menu "ROOT partition of the existing install:" "${items[@]}"
++}
++
++# Live system rebooted: mount the existing install again and chroot in
++remount() {
++    local part
++    part=$(pick_root) || exit 0
++    cls
++    MNT=$MNT bash "$DIR/../rescue.sh" "/dev/$part"
++}
++
+ # ---------- Modes ----------
+ 
+ full_install() {
+@@ -182,11 +199,15 @@ stage3_only() {
+ mode=$(menu "What do you want to do?" \
      full   "Full install: partition, Btrfs, stage3, chroot" \
      stage3 "Stage3 only (new root already mounted at $MNT)" \
-     chroot "Chroot only (enter $MNT)" \
--    remount "Live USB rebooted: mount existing install + chroot") || exit 0
+-    chroot "Chroot only (enter $MNT)") || exit 0
++    chroot "Chroot only (enter $MNT)" \
 +    remount "Live USB rebooted: mount existing install + chroot" \
 +    setup  "Setup (INSIDE the chroot): pick which steps to run") || exit 0
  
@@ -676,145 +723,7 @@ index 4cf2301..e6e5a3d 100755
      full)   full_install ;;
      stage3) stage3_only ;;
      chroot) enter_chroot ;;
-     remount) remount ;;
++    remount) remount ;;
 +    setup)  cls; exec bash "$DIR/setup.sh" ;;
  esac
  cls
--- 
-2.43.0
-
-
-From 47a71a0de121f8df72eeaf32d66c972d7dae9c4c Mon Sep 17 00:00:00 2001
-From: Claude <noreply@anthropic.com>
-Date: Sat, 17 Oct 2026 14:30:52 +0000
-Subject: [PATCH 6/7] samba: reuse CFG_USER_PW (plain text) instead of asking
-
----
- lib/setup.sh | 9 +++++++--
- 1 file changed, 7 insertions(+), 2 deletions(-)
-
-diff --git a/lib/setup.sh b/lib/setup.sh
-index 12ecbe9..55547a6 100755
---- a/lib/setup.sh
-+++ b/lib/setup.sh
-@@ -485,8 +485,13 @@ s_samba() {
- CONF
-     if [ "$INIT" = openrc ]; then rc-update add samba default
-     else SYSTEMD_IGNORE_CHROOT=1 systemctl enable smb.service; fi
--    echo "Samba password for $CFG_USER:"
--    until smbpasswd -a "$CFG_USER"; do echo "Try again."; done
-+    if [ -n "${CFG_USER_PW:-}" ] && [[ "$CFG_USER_PW" != \$*\$*\$* ]]; then
-+        printf '%s\n%s\n' "$CFG_USER_PW" "$CFG_USER_PW" | smbpasswd -a -s "$CFG_USER"
-+        echo "Samba password for $CFG_USER = CFG_USER_PW"
-+    else
-+        echo "Samba password for $CFG_USER:"
-+        until smbpasswd -a "$CFG_USER"; do echo "Try again."; done
-+    fi
- }
- 
- # ---------- Choose steps ----------
--- 
-2.43.0
-
-
-From 0682d4d010e5eb4c178eb0ef29dd203b736e7a8f Mon Sep 17 00:00:00 2001
-From: Claude <noreply@anthropic.com>
-Date: Sat, 17 Oct 2026 14:39:52 +0000
-Subject: [PATCH 7/7] Passwords: placeholders in repo .env, real ones in ~/.env
- (used first)
-
----
- .env          | 22 +++++++++++-----------
- env.example   |  3 ++-
- lib/chroot.sh |  8 +++++++-
- lib/setup.sh  |  6 +++---
- 4 files changed, 23 insertions(+), 16 deletions(-)
-
-diff --git a/.env b/.env
-index 01535d1..ba35c75 100644
---- a/.env
-+++ b/.env
-@@ -29,17 +29,17 @@ CFG_KEY_DELAY=900
- CFG_KEY_RATE=11
- 
- # ---------- Passwords ----------
--# Deliberately EMPTY, because this file is in git. Left empty, setup.sh asks
--# for both at the end of the run and nothing is ever written to disk.
-+# Leave EMPTY here - this file is public on GitHub.
- #
--# If you ever do want them stored, do NOT put a plaintext password here.
--# Use a hash in single quotes, which setup.sh hands to "chpasswd -e":
--#     openssl passwd -6
--#     CFG_ROOT_PW='$6$salt$digest'
--# Even a hash in a repo can be attacked offline, so prefer the prompt.
-+# To put your passwords in, use a copy in your home folder:
-+#     cp .env ~/.env
-+#     nano ~/.env          # fill in the two lines below
-+#     chmod 600 ~/.env
-+# setup.sh and gir.sh use ~/.env first, so the repo copy stays empty.
-+# After a successful setup the copy inside the chroot is deleted.
-+#
-+# Example (plain text or a hash from "openssl passwd -6" in single quotes):
-+#     CFG_ROOT_PW='MyRootPass'
-+#     CFG_USER_PW='MyOssiPass'
- CFG_ROOT_PW=
- CFG_USER_PW=
--
--# ---------- Unattended ----------
--# 1 = accept everything above without asking. Leave empty to be prompted.
--UNATTENDED=
-diff --git a/env.example b/env.example
-index 2e043fc..2236d8a 100644
---- a/env.example
-+++ b/env.example
-@@ -11,7 +11,8 @@
- # setup.sh looks for it at $SETUP_ENV, then /root/.env, then .env next to
- # the script, then ~/.env.
- #
--# Keep passwords OUT of a tracked .env - see the Passwords section below.
-+# Passwords: leave them empty here and put them in a copy at ~/.env
-+# (cp .env ~/.env; chmod 600 ~/.env) - ~/.env is used first.
- #
- # Anything set here becomes the DEFAULT in the prompt - you can still type
- # over it. Set UNATTENDED=1 to accept them all without being asked.
-diff --git a/lib/chroot.sh b/lib/chroot.sh
-index be1803d..cd8bc1d 100755
---- a/lib/chroot.sh
-+++ b/lib/chroot.sh
-@@ -92,7 +92,13 @@ mkroot() {
-     fi
-     # Personal defaults, which live outside the repo. May contain a password,
-     # so it goes in mode 600; setup.sh shreds this copy when it finishes.
--    local env_src=${SETUP_ENV:-$ROOT/.env}
-+    # Order: $SETUP_ENV, then ~/.env (your private copy with passwords),
-+    # then the repo .env (public, passwords empty).
-+    local env_src=${SETUP_ENV:-}
-+    if [ -z "$env_src" ]; then
-+        if [ -f "${HOME:-/root}/.env" ]; then env_src=${HOME:-/root}/.env
-+        else env_src=$ROOT/.env; fi
-+    fi
-     if [ -f "$env_src" ]; then
-         install -m 600 "$env_src" "$tdir/root/.env"
-         echo ".env copied to /root/.env (mode 600)"
-diff --git a/lib/setup.sh b/lib/setup.sh
-index 55547a6..7586553 100755
---- a/lib/setup.sh
-+++ b/lib/setup.sh
-@@ -44,11 +44,11 @@ mountpoint -q /boot/efi || { echo "/boot/efi is not mounted. From the live syste
- # variable set in the environment wins for a single run. Passwords are
- # deliberately empty there, so they get asked for instead.
- # With no .env at all, every personal field starts empty and is asked for.
--# Search order: $SETUP_ENV, /root/.env (the copy chroot.sh makes), .env
--# beside this script, the repo root one level up, then ~/.env.
-+# Search order: $SETUP_ENV, /root/.env (= ~/.env of root, your private copy),
-+# ~/.env, then the repo .env beside this script or one level up.
- if [ -z "${SETUP_ENV:-}" ]; then
-     _d=$(cd "$(dirname "$0")" && pwd)
--    for c in /root/.env "$_d/.env" "$_d/../.env" "${HOME:-/root}/.env"; do
-+    for c in /root/.env "${HOME:-/root}/.env" "$_d/.env" "$_d/../.env"; do
-         if [ -f "$c" ]; then SETUP_ENV=$c; break; fi
-     done
-     unset _d
--- 
-2.43.0
-
