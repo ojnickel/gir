@@ -380,7 +380,7 @@ index be1803d..bcd9196 100755
          install -m 600 "$env_src" "$tdir/root/.env"
          echo ".env copied to /root/.env (mode 600)"
 diff --git a/lib/setup.sh b/lib/setup.sh
-index c2d8d1c..8b4ac19 100755
+index c2d8d1c..62658e4 100755
 --- a/lib/setup.sh
 +++ b/lib/setup.sh
 @@ -6,7 +6,7 @@
@@ -423,7 +423,66 @@ index c2d8d1c..8b4ac19 100755
  
  if [ -n "${SETUP_ENV:-}" ] && [ -f "$SETUP_ENV" ]; then
      echo "Loading personal defaults from $SETUP_ENV"
-@@ -116,12 +115,20 @@ ask CFG_DESKTOP  "Desktop (sway, none)"           sway
+@@ -76,6 +75,58 @@ else
+     echo "No .env found - personal fields start empty (see env.example)."
+ fi
+ 
++# ---------- Choose steps (first, before any question) ----------
++# name | function | what it does
++STEPS=(
++    "01-sync     s_sync     Sync the Portage tree"
++    "02-profile  s_profile  Set the profile"
++    "03-binhost  s_binhost  Binary packages (binhost)"
++    "04-makeconf s_makeconf make.conf (CPU, GPU, USE)"
++    "05-locale   s_locale   Time zone, language, keyboard"
++    "06-world    s_world    Update @world"
++    "07-kernel   s_kernel   Kernel + firmware"
++    "08-system   s_system   Hostname, network, tools"
++    "09-desktop  s_desktop  Sway desktop (+ GURU for fuzzel)"
++    "10-user     s_user     User + Sway config"
++    "11-boot     s_boot     GRUB + screen resolution"
++    "12-samba    s_samba    Samba"
++    "13-kbdrate  s_kbdrate  Key repeat (console)"
++)
++SET_PW=yes
++if [ "${UNATTENDED:-}" = 1 ]; then
++    pick=""
++else
++    echo
++    echo "Steps ([x] = already done):"
++    i=1
++    for e in "${STEPS[@]}"; do
++        read -r name _ desc <<<"$e"
++        mark="[ ]"; [ -f "$DONE/$name" ] && mark="[x]"
++        printf '  %2d %s %s\n' "$i" "$mark" "$desc"
++        i=$((i + 1))
++    done
++    echo
++    echo "  Enter     = run all steps that are not done"
++    echo "  a         = run ALL steps again"
++    echo "  9 10 12   = run only these steps (also if done)"
++    read -rp "Choice: " pick
++fi
++
++case "${pick:-}" in
++    "") ;;                                    # normal: skip what is done
++    a|A) rm -f "$DONE"/[0-9][0-9]-* ;;        # forget all markers
++    *)  for n in $pick; do
++            [[ "$n" =~ ^[0-9]+$ ]] && [ "$n" -ge 1 ] && [ "$n" -le ${#STEPS[@]} ] \
++                || { echo "Not a step number: $n"; exit 1; }
++        done
++        # run only the chosen ones, even if they were done before
++        for n in $pick; do read -r name _ <<<"${STEPS[n-1]}"; rm -f "$DONE/$name"; done
++        read -rp "Set the root and user passwords at the end? [y/N] " a
++        [[ "${a:-n}" =~ ^[yYjJ] ]] || SET_PW=no
++        ;;
++esac
++
++
+ # ---------- Questions ----------
+ # A CFG_ value already set (from .env or the environment) is offered as
+ # the default; UNATTENDED=1 accepts it without asking. Fields with no default
+@@ -116,12 +167,20 @@ ask CFG_DESKTOP  "Desktop (sway, none)"           sway
  # USE flags globally, so most binary packages stop matching and get compiled
  # from source instead - hours rather than minutes. Sway does not need it.
  ask CFG_PROFILE  "Profile: 'plain' (matches binhost, fast) or 'desktop'" plain
@@ -444,7 +503,7 @@ index c2d8d1c..8b4ac19 100755
  
  # ---------- Detect the init system of the extracted stage3 ----------
  # tui.sh offers systemd stage3 variants, so nothing here may assume OpenRC.
-@@ -183,6 +190,8 @@ cat <<INFO
+@@ -183,6 +242,8 @@ cat <<INFO
    CPU:       $CPUS threads, $MEM_GB GB RAM -> MAKEOPTS -j$JOBS, binhost $LEVEL
    GPU:       VIDEO_CARDS="$VIDEO"
    Desktop:   $DESKTOP_DESC
@@ -453,7 +512,7 @@ index c2d8d1c..8b4ac19 100755
    Log:       $LOG
  
  INFO
-@@ -311,9 +320,22 @@ s_system() {
+@@ -311,9 +372,22 @@ s_system() {
      chmod 440 /etc/sudoers.d/wheel
  }
  
@@ -476,7 +535,7 @@ index c2d8d1c..8b4ac19 100755
      "${EMERGE[@]}" gui-wm/sway gui-apps/swaybg gui-apps/swaylock gui-apps/swayidle \
          gui-apps/waybar gui-apps/foot gui-apps/fuzzel gui-apps/mako \
          gui-apps/grim gui-apps/slurp gui-apps/wl-clipboard \
-@@ -329,7 +351,11 @@ s_user() {
+@@ -329,7 +403,11 @@ s_user() {
      local sh
      sh=$(command -v "$CFG_SHELL" || echo /bin/bash)    # real path, not a guessed one
      grep -qx "$sh" /etc/shells 2>/dev/null || echo "$sh" >> /etc/shells
@@ -489,7 +548,7 @@ index c2d8d1c..8b4ac19 100755
      local h
      h=$(getent passwd "$CFG_USER" | cut -d: -f6)
  
-@@ -344,7 +370,11 @@ s_user() {
+@@ -344,7 +422,11 @@ s_user() {
              cat >> "$h/.config/sway/config" <<CONF
  
  # --- setup.sh ---
@@ -502,7 +561,7 @@ index c2d8d1c..8b4ac19 100755
  bar { swaybar_command waybar }
  exec gentoo-pipewire-launcher restart
  exec mako
-@@ -391,6 +421,7 @@ s_boot() {
+@@ -391,6 +473,7 @@ s_boot() {
      fi
      # Fallback path \EFI\BOOT\BOOTX64.EFI: boots even if the NVRAM entry gets lost
      grub-install --target=x86_64-efi --efi-directory=/boot/efi --removable
@@ -510,7 +569,7 @@ index c2d8d1c..8b4ac19 100755
      grub-mkconfig -o /boot/grub/grub.cfg
      # Only a btrfs root lives in a subvolume, so only it needs rootflags
      if [ "$ROOTFS" = btrfs ]; then
-@@ -399,17 +430,129 @@ s_boot() {
+@@ -399,17 +482,78 @@ s_boot() {
      fi
  }
  
@@ -588,57 +647,6 @@ index c2d8d1c..8b4ac19 100755
 +    fi
 +}
 +
-+# ---------- Choose steps ----------
-+# name | function | what it does
-+STEPS=(
-+    "01-sync     s_sync     Sync the Portage tree"
-+    "02-profile  s_profile  Set the profile"
-+    "03-binhost  s_binhost  Binary packages (binhost)"
-+    "04-makeconf s_makeconf make.conf (CPU, GPU, USE)"
-+    "05-locale   s_locale   Time zone, language, keyboard"
-+    "06-world    s_world    Update @world"
-+    "07-kernel   s_kernel   Kernel + firmware"
-+    "08-system   s_system   Hostname, network, tools"
-+    "09-desktop  s_desktop  Sway desktop (+ GURU for fuzzel)"
-+    "10-user     s_user     User $CFG_USER + Sway config"
-+    "11-boot     s_boot     GRUB ($CFG_RES)"
-+    "12-samba    s_samba    Samba"
-+    "13-kbdrate  s_kbdrate  Key repeat ($CFG_KEY_DELAY ms / $CFG_KEY_RATE)"
-+)
-+SET_PW=yes
-+if [ "${UNATTENDED:-}" = 1 ]; then
-+    pick=""
-+else
-+    echo
-+    echo "Steps ([x] = already done):"
-+    i=1
-+    for e in "${STEPS[@]}"; do
-+        read -r name _ desc <<<"$e"
-+        mark="[ ]"; [ -f "$DONE/$name" ] && mark="[x]"
-+        printf '  %2d %s %s\n' "$i" "$mark" "$desc"
-+        i=$((i + 1))
-+    done
-+    echo
-+    echo "  Enter     = run all steps that are not done"
-+    echo "  a         = run ALL steps again"
-+    echo "  9 10 12   = run only these steps (also if done)"
-+    read -rp "Choice: " pick
-+fi
-+
-+case "${pick:-}" in
-+    "") ;;                                    # normal: skip what is done
-+    a|A) rm -f "$DONE"/[0-9][0-9]-* ;;        # forget all markers
-+    *)  for n in $pick; do
-+            [[ "$n" =~ ^[0-9]+$ ]] && [ "$n" -ge 1 ] && [ "$n" -le ${#STEPS[@]} ] \
-+                || { echo "Not a step number: $n"; exit 1; }
-+        done
-+        # run only the chosen ones, even if they were done before
-+        for n in $pick; do read -r name _ <<<"${STEPS[n-1]}"; rm -f "$DONE/$name"; done
-+        read -rp "Set root and $CFG_USER passwords at the end? [y/N] " a
-+        [[ "${a:-n}" =~ ^[yYjJ] ]] || SET_PW=no
-+        ;;
-+esac
-+
 +i=1
 +for e in "${STEPS[@]}"; do
 +    read -r name fn _ <<<"$e"
@@ -651,7 +659,7 @@ index c2d8d1c..8b4ac19 100755
  
  # ---------- Passwords (repeat until they work) ----------
  # ---------- Passwords ----------
-@@ -432,17 +575,19 @@ set_pw() {   # set_pw ACCOUNT VALUE
+@@ -432,17 +576,19 @@ set_pw() {   # set_pw ACCOUNT VALUE
      esac
  }
  
