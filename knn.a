@@ -1,0 +1,28 @@
+#!/bin/bash
+# Slow key repeat: text console (from boot on) + Sway
+# Works in the chroot, in the booted Gentoo and from the live USB
+U=${1:-ossi}
+DELAY=900   # Sway delay in ms
+CONS=1000   # console delay: only 250, 500, 750 or 1000
+RATE=11     # keys per second
+
+for R in /mnt/gentoo /mnt/gir ""; do [ -d "$R/etc/local.d" ] && break; done
+[ -d "$R/etc/local.d" ] || { echo "No Gentoo found"; exit 1; }
+
+# Console: runs at every boot, before the login prompt
+printf '#!/bin/sh\nkbdrate -s -d %s -r %s\n' "$CONS" "$RATE" > "$R/etc/local.d/kbdrate.start"
+chmod +x "$R/etc/local.d/kbdrate.start"
+ln -sf /etc/init.d/local "$R/etc/runlevels/default/local"
+echo "Console: delay $CONS ms, rate $RATE"
+
+# Sway
+C=$R/home/$U/.config/sway/config
+if [ -f "$C" ]; then
+    sed -i "s/repeat_delay .*/repeat_delay $DELAY/; s/repeat_rate .*/repeat_rate $RATE/" "$C"
+    grep -q repeat_delay "$C" || printf '\ninput type:keyboard {\n    repeat_delay %s\n    repeat_rate %s\n}\n' "$DELAY" "$RATE" >> "$C"
+    chown --reference="$R/home/$U" "$C"
+    grep repeat "$C"
+else
+    echo "No Sway config for $U yet - run this again after step 10"
+fi
+echo "done - active after the next reboot"
